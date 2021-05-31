@@ -1,4 +1,8 @@
-import usb_hid
+try:
+    import usb_hid
+except:
+    pass
+
 from micropython import const
 
 from kmk.keys import FIRST_KMK_INTERNAL_KEY, ConsumerKey, ModifierKey
@@ -12,13 +16,23 @@ except ImportError:
     # BLE not supported on this platform
     pass
 
+try:
+    import board
+    import busio
+    import digitalio
+except:
+    # BluefruitSPI library missing
+    pass
+from kmk.drivers.bluefruitspi import BluefruitSPI
+
 
 class HIDModes:
     NOOP = 0  # currently unused; for testing?
     USB = 1
     BLE = 2
+    BLUEFRUITSPI = 4
 
-    ALL_MODES = (NOOP, USB, BLE)
+    ALL_MODES = (NOOP, USB, BLE, BLUEFRUITSPI)
 
 
 class HIDReportTypes:
@@ -121,7 +135,7 @@ class AbstractHID:
         # the CircuitPython-targeting one, except when unit testing or doing
         # something truly bizarre. This will likely change eventually when Bluetooth
         # is added)
-        pass
+        print(evt)
 
     def send(self):
         self.hid_send(self._evt)
@@ -328,3 +342,32 @@ class BLEHID(AbstractHID):
 
     def stop_advertising(self):
         self.ble.stop_advertising()
+
+class BluefruitSPIHID(AbstractHID):
+    REPORT_BYTES = 9
+    def __init__(self, cs, irq, rst):
+        self.cs = digitalio.DigitalInOut(cs)
+        self.irq = digitalio.DigitalInOut(irq)
+        self.rst = digitalio.DigitalInOut(rst)
+        super(BluefruitSPIHID, self).__init__()
+
+    def post_init(self, ble_name=str(getmount('/').label), **kwargs):
+        print("Initializing bluefruit")
+        self.spi = busio.SPI(board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+        self.bluefruit = BluefruitSPI(self.spi, self.cs, self.irq, self.rst, debug=False)
+
+        self.bluefruit.init()
+        self.bluefruit.command_check_OK(b"AT+FACTORYRESET", delay=1)
+        self.bluefruit.command(b'ATE=0')
+        self.bluefruit.command(f'AT+GAPDEVNAME={ble_name}'.encode())
+        self.bluefruit.command(b'AT+BLEHIDEN=1')
+        self.bluefruit.command(b'AT+GAPINTERVALS=10,30,,')
+        print("Resetting bluefruit")
+        self.bluefruit.command(b'ATZ')
+        print("bluefruit ready")
+
+    def hid_send(self, evt):
+        self.bluefruit.send_keyboard_code(evt[1:])
+
+    def after_matrix_scan(self):
+        self.bluefruit.pop_keyboard_code_queue()

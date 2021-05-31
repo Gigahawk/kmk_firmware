@@ -1,5 +1,5 @@
 from kmk.consts import KMK_RELEASE, UnicodeMode
-from kmk.hid import BLEHID, USBHID, AbstractHID, HIDModes
+from kmk.hid import BLEHID, BluefruitSPIHID, USBHID, AbstractHID, HIDModes
 from kmk.keys import KC
 from kmk.kmktime import ticks_ms
 from kmk.matrix import MatrixScanner, intify_coordinate
@@ -29,6 +29,10 @@ class KMKKeyboard:
 
     unicode_mode = UnicodeMode.NOOP
     tap_time = 300
+
+    bluefruitspi_cs = None
+    bluefruitspi_irq = None
+    bluefruitspi_rst = None
 
     modules = []
     extensions = []
@@ -322,6 +326,12 @@ class KMKKeyboard:
             self._hid_helper = USBHID
         elif self.hid_type == HIDModes.BLE:
             self._hid_helper = BLEHID
+        elif self.hid_type == HIDModes.BLUEFRUITSPI:
+            self._hid_helper = (
+                lambda: BluefruitSPIHID(
+                    self.bluefruitspi_cs,
+                    self.bluefruitspi_irq,
+                    self.bluefruitspi_rst))
         else:
             self._hid_helper = AbstractHID
         self._hid_helper = self._hid_helper()
@@ -365,6 +375,9 @@ class KMKKeyboard:
             except Exception as err:
                 if self.debug_enabled:
                     print('Failed to run post matrix function in extension: ', err, ext)
+
+        if self._hid_helper.after_matrix_scan:
+            self._hid_helper.after_matrix_scan()
 
     def before_hid_send(self):
         for module in self.modules:
